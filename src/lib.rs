@@ -2,20 +2,27 @@ use reqwest::{Client};
 use scraper::{Html, Selector};
 use quick_error::{quick_error};
 use url::Url;
+use bytes::Bytes;
 
 pub struct SciHubScraper {
     client: Client,
-    pub scihub_base_urls: Option<Vec<Url>>
+    pub base_urls: Option<Vec<Url>>
 }
 
 impl SciHubScraper {
     pub fn new() -> Self {
         SciHubScraper {
             client: Client::new(),
-            scihub_base_urls: None
+            base_urls: None
         }
     }
-    pub async fn fetch_scihub_base_urls(&mut self) -> Result<(), Error> {
+    pub fn with_base_urls(base_urls: Vec<Url>) -> Self {
+        SciHubScraper {
+            client: Client::new(),
+            base_urls: Some(base_urls)
+        }
+    }
+    pub async fn fetch_base_urls(&mut self) -> Result<(), Error> {
         let scihub_now_url = Url::parse("https://sci-hub.now.sh/").unwrap();
         let document = self.fetch_html_document(scihub_now_url).await?;
 
@@ -27,14 +34,14 @@ impl SciHubScraper {
             .collect();
         domains.dedup();
 
-        self.scihub_base_urls = Some(domains);
+        self.base_urls = Some(domains);
         Ok(())
     }
-    async fn ensure_scihub_base_urls(&mut self) -> Result<(), Error> {
-        if self.scihub_base_urls.is_none() {
-            self.fetch_scihub_base_urls().await?;
+    async fn ensure_base_urls(&mut self) -> Result<(), Error> {
+        if self.base_urls.is_none() {
+            self.fetch_base_urls().await?;
         }
-        if let Some(vec) = &self.scihub_base_urls {
+        if let Some(vec) = &self.base_urls {
             if vec.is_empty() {
                 return Err(Error::Other("No sci-hub domains found."));
             }
@@ -47,36 +54,51 @@ impl SciHubScraper {
         base_url.join(doi)
     }
     pub fn urls_from_doi<'a>(&self, doi: &'a str) -> Option<Vec<Url>> {
-        self.scihub_base_urls.as_ref()
+        self.base_urls.as_ref()
             .map(|base_urls|
                 base_urls.iter()
                     .filter_map(|base_url| Self::url_from_base_url_and_doi(base_url, doi).ok())
                     .collect())
     }
     pub async fn fetch_pdf_url_from_doi(&mut self, doi: &str) -> Result<String, Error> {
-        self.ensure_scihub_base_urls().await?;
+        self.ensure_base_urls().await?;
 
-        let pdf_frame_selector = Selector::parse("iframe#pdf[src]").unwrap();
-        for url in self.urls_from_doi(doi).unwrap() {
-            match self.fetch_html_document(url.clone()).await {
-                Ok(document) => {
-                    if let Some(pdf_url) = document.select(&pdf_frame_selector)
-                        .next()
-                        .map(|node| node.value().attr("src"))
-                        .flatten() {
-                            if pdf_url.starts_with("//") {
-                                return Ok(format!("{}:{}", url.scheme(), pdf_url));
-                            }
-                            return Ok(String::from(pdf_url));
-                    }
-                },
-                Err(e) => {
-                    println!("{:?}", e);
-                    // TODO remove or mark domain as broken.
-                }
-            }
+        for base_url in self.base_urls.as_ref().unwrap() {
+            let pdf_url = self.fetch_pdf_url_from_base_url_and_doi(&base_url, &doi).await?;
+            return Ok(pdf_url);
         }
         Err(Error::Other("Invalid doi or no working sci-hub mirror found"))
+    }
+    pub async fn fetch_pdf_url_from_base_url_and_doi(&self, base_url: &Url, doi: &str) -> Result<String, Error> {
+        let url = Self::url_from_base_url_and_doi(&base_url, doi)?;
+        self.fetch_pdf_url_from_scihub_url(&url).await
+    }
+    pub async fn fetch_pdf_url_from_scihub_url(&self, url: &Url) -> Result<String, Error> {
+        let pdf_frame_selector = Selector::parse("iframe#pdf[src]").unwrap();
+        let document = self.fetch_html_document(url.clone()).await?;
+        let pdf_url = document.select(&pdf_frame_selector)
+            .filter_map(|node| node.value().attr("src"))
+            .next()
+            .ok_or(Error::Other("Pdf url not found in page."))?;
+        if pdf_url.starts_with("//") {
+            return Ok(format!("{}:{}", url.scheme(), pdf_url));
+        }
+        return Ok(String::from(pdf_url));
+    }
+    pub async fn fetch_pdf_bytes_from_doi(&mut self, doi: &str) -> Result<Bytes, Error> {
+        let pdf_url_str = self.fetch_pdf_url_from_doi(doi).await?;
+        let pdf_url = Url::parse(&pdf_url_str)?;
+        self.fetch_pdf_document(pdf_url).await
+    }
+    pub async fn fetch_pdf_bytes_from_base_url_and_doi(&self, base_url: &Url, doi: &str) -> Result<Bytes, Error> {
+        let pdf_url_str = self.fetch_pdf_url_from_base_url_and_doi(base_url, doi).await?;
+        let pdf_url = Url::parse(&pdf_url_str)?;
+        self.fetch_pdf_document(pdf_url).await
+    }
+    pub async fn fetch_pdf_bytes_from_scihub_url(&self, url: &Url) -> Result<Bytes, Error> {
+        let pdf_url_str = self.fetch_pdf_url_from_scihub_url(url).await?;
+        let pdf_url = Url::parse(&pdf_url_str)?;
+        self.fetch_pdf_document(pdf_url).await
     }
     async fn fetch_html_document(&self, url: Url) -> Result<Html, Error> {
         let text = self.client
@@ -86,15 +108,26 @@ impl SciHubScraper {
             .text().await?;
         Ok(Html::parse_document(&text))
     }
+    async fn fetch_pdf_document(&self, url: Url) -> Result<Bytes, Error> {
+        let bytes = self.client.get(url)
+            .send().await?
+            .bytes().await?;
+        Ok(bytes)
+    }
 
 }
 
 quick_error! {
     #[derive(Debug)]
     pub enum Error {
-        Io(err: reqwest::Error) {
+        Reqwest(err: reqwest::Error) {
             from()
             display("Reqwest error: {}", err)
+            cause(err)
+        }
+        UrlParse(err: url::ParseError) {
+            from()
+            display("Url parse error: {}", err)
             cause(err)
         }
         Other(descr: &'static str) {
