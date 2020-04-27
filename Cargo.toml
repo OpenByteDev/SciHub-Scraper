@@ -1,6 +1,6 @@
 [package]
 name = "scihub-scraper"
-version = "0.1.0"
+version = "0.2.0"
 description = "Scraps paper pdf urls from sci-hub."
 repository = "https://github.com/OpenByteDev/scihub-scraper"
 license = "MIT"
