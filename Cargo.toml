@@ -1,6 +1,6 @@
 [package]
 name = "scihub-scraper"
-version = "0.2.0"
+version = "0.3.0"
 description = "Scraps paper pdf urls from sci-hub."
 repository = "https://github.com/OpenByteDev/scihub-scraper"
 license = "MIT"
@@ -13,7 +13,7 @@ reqwest = "0.10"
 scraper = "0.11"
 quick-error = "1.2"
 url = "2.1"
-bytes = "0.5"
+lazy_static = "1.4"
 
 [dev-dependencies]
 tokio = "0.2"

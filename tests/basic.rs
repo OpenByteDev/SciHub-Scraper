@@ -1,6 +1,9 @@
-use scihub_scraper::*;
+use scihub_scraper::SciHubScraper;
 use tokio::runtime::Runtime;
 use url::Url;
+
+const TEST_DOI: &str = "10.1016/j.tplants.2018.11.001";
+const TEST_TITLE: &str = "Capsaicinoids: Pungency beyond Capsicum. Trends in Plant Science";
 
 #[test]
 fn finds_scihub_base_urls() -> Result<(), Box<dyn std::error::Error>> {
@@ -15,32 +18,37 @@ fn finds_scihub_base_urls() -> Result<(), Box<dyn std::error::Error>> {
 #[test]
 fn creates_valid_scihub_urls() -> Result<(), Box<dyn std::error::Error>> {
     let base_url = Url::parse("http://sci-hub.test")?;
-    SciHubScraper::url_from_base_url_and_doi(&base_url, "10.1016/j.tplants.2018.11.001")?;
+    SciHubScraper::scihub_url_from_base_url_and_doi(&base_url, TEST_DOI)?;
     Ok(())
 }
 
 #[test]
-fn finds_scihub_pdf_url() -> Result<(), Box<dyn std::error::Error>> {
+fn fetches_paper() -> Result<(), Box<dyn std::error::Error>> {
     let mut scihub = SciHubScraper::new();
     let mut runtime = Runtime::new()?;
-    let pdf_url_str = runtime.block_on(scihub.fetch_pdf_url_from_doi("10.1016/j.tplants.2018.11.001"))?;
-    let pdf_url = Url::parse(&pdf_url_str)?;
+    let paper = runtime.block_on(scihub.fetch_paper_by_doi(TEST_DOI))?;
+    assert_eq!(paper.doi, TEST_DOI);
+    assert_eq!(paper.title, TEST_TITLE);
+    assert!(!paper.other_versions.is_empty());
+    check_pdf_url(&paper.download_url, &mut runtime)
+}
+
+#[test]
+fn fetches_pdf_url_direct() -> Result<(), Box<dyn std::error::Error>> {
+    let mut scihub = SciHubScraper::new();
+    let mut runtime = Runtime::new()?;
+    let pdf_url = runtime.block_on(scihub.fetch_paper_pdf_url_by_doi(TEST_DOI))?;
+    check_pdf_url(&pdf_url, &mut runtime)
+}
+
+fn check_pdf_url(pdf_url: &str, runtime:&mut Runtime) -> Result<(), Box<dyn std::error::Error>> {
+    let pdf_url = Url::parse(pdf_url)?;
     assert!(pdf_url.path().ends_with(".pdf"), "Pdf url path does not end with '.pdf'");
-    println!("{:?}", pdf_url);
     assert_eq!(
         runtime.block_on(reqwest::get(pdf_url))?
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
         .unwrap()
         .to_str()?, "application/pdf");
-    Ok(())
-}
-
-#[test]
-fn fetches_scihub_pdf_bytes() -> Result<(), Box<dyn std::error::Error>> {
-    let mut scihub = SciHubScraper::new();
-    let mut runtime = Runtime::new()?;
-    let pdf_bytes = runtime.block_on(scihub.fetch_pdf_bytes_from_doi("10.1016/j.tplants.2018.11.001"))?;
-    assert!(!pdf_bytes.is_empty());
     Ok(())
 }
