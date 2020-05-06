@@ -4,23 +4,19 @@ extern crate lazy_static;
 use reqwest::{Client, header, redirect};
 use scraper::{Html, Selector};
 use url::Url;
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 
 pub struct SciHubScraper {
     client: Client,
-    pub base_urls: Option<Vec<Url>>
-}
-
-impl Default for SciHubScraper {
-    fn default() -> Self {
-        Self::new()
-    }
+    pub base_urls: BinaryHeap<WeightedUrl>
 }
 
 impl SciHubScraper {
     pub fn new() -> Self {
         SciHubScraper {
             client: Client::new(),
-            base_urls: None
+            base_urls: BinaryHeap::new()
         }
     }
     /// Creates a new `SciHubScraper` with the given sci-hub base url. (This will disable the automatic sci-hub domain detection).
@@ -31,7 +27,10 @@ impl SciHubScraper {
     pub fn with_base_urls(base_urls: Vec<Url>) -> Self {
         SciHubScraper {
             client: Client::new(),
-            base_urls: Some(base_urls)
+            base_urls: Self::base_urls_as_heap(base_urls)
+        }
+    }
+
     /// Generates a scihub paper url from the given base url and doi.
     pub fn scihub_url_from_base_url_and_doi(base_url: &Url, doi: &str) -> Result<Url, url::ParseError> {
         base_url.join(doi)
@@ -43,14 +42,21 @@ impl SciHubScraper {
             return String::from(relative_url);
         }
     }
+    fn base_urls_as_heap(base_urls: Vec<Url>) -> BinaryHeap<WeightedUrl> {
+        let mut heap = BinaryHeap::with_capacity(base_urls.len());
+        for base_url in base_urls {
+            heap.push(base_url.into());
+        }
+        heap
+    }
 
-    /// Fetches a list of base urls from sci-hub.now.sh.
-    pub async fn fetch_base_urls(&mut self) -> Result<&Vec<Url>, Error> {
+    /// Fetches a list of base urls from sci-hub.now.sh and adds them to the base url heap.
+    pub async fn fetch_base_urls(&mut self) -> Result<&BinaryHeap<WeightedUrl>, Error> {
         let scihub_now_url = Url::parse("https://sci-hub.now.sh/").unwrap();
         self.fetch_base_urls_from_provider(scihub_now_url).await
     }
-    /// Fetches a list of base urls from the given provider.
-    pub async fn fetch_base_urls_from_provider(&mut self, scihub_url_provider: Url) -> Result<&Vec<Url>, Error> {
+    /// Fetches a list of base urls from the given provider and adds them to the base url heap.
+    pub async fn fetch_base_urls_from_provider(&mut self, scihub_url_provider: Url) -> Result<&BinaryHeap<WeightedUrl>, Error> {
         let document = self.fetch_html_document(scihub_url_provider).await?;
 
         let link_selector = Selector::parse("a[href]").unwrap();
@@ -60,33 +66,75 @@ impl SciHubScraper {
             .filter(|url| url.domain().map_or(false, |e| e.starts_with("sci-hub") && !e.ends_with("now.sh")))
             .collect();
         base_urls.dedup();
+        
+        self.base_urls.reserve(base_urls.len());
+        for base_url in base_urls {
+            self.base_urls.push(base_url.into());
+        }
 
-        self.base_urls = Some(domains);
-        Ok(self.base_urls.as_ref().unwrap())
+        Ok(&self.base_urls)
     }
-    async fn ensure_base_urls(&mut self) -> Result<&Vec<Url>, Error> {
-        if self.base_urls.is_none() {
+    /// Ensures a list of base urls by fetching them from the default provider if there are none currently.
+    pub async fn ensure_base_urls(&mut self) -> Result<&BinaryHeap<WeightedUrl>, Error> {
+        if self.base_urls.is_empty() {
             self.fetch_base_urls().await?;
-        }
-        if let Some(vec) = &self.base_urls {
-            if vec.is_empty() {
-                return Err(Error::Other("No sci-hub domains found."));
+            if self.base_urls.is_empty() {
+                return Err(Error::Other("Failed to load sci-hub domains."))
             }
-            Ok(&vec)
-        } else {
-            Err(Error::Other("Failed to load sci-hub domains."))
         }
+        Ok(&self.base_urls)
     }
 
+    /*async fn try_fetch_with_base_urls<T, F:Future<Output=Result<T, Error>>, FN: Fn(Url) -> F>(&mut self, doi: &str, fetch_fn: FN) -> Result<T, Error> {
+        self.ensure_base_urls().await?;
+
+        let mut failing_urls: Vec<WeightedUrl> = Vec::new();
+        while !self.base_urls.is_empty() {
+            let base_url = &self.base_urls.peek().unwrap().url; // we are guaranteed to have at least one base url.
+            let url = Self::scihub_url_from_base_url_and_doi(base_url, doi)?;
+
+            let result = self.fetch_paper_from_scihub_url(url).await;
+
+            if result.is_ok() {
+                for mut failing_url in failing_urls {
+                    failing_url.weight -= 10;
+                    self.base_urls.push(failing_url);
+                }
+                let mut working_base_url = self.base_urls.peek_mut().unwrap();
+                working_base_url.weight += 1;
+                return result;
+            } else {
+                failing_urls.push(self.base_urls.pop().unwrap())
+            }
+        }
+
+        Err(Error::Other("Invalid doi or no working sci-hub mirror found"))
+    }*/
 
     /// Fetches the paper with the given doi from sci-hub, automatically fetching current sci-hub domains.
     pub async fn fetch_paper_by_doi(&mut self, doi: &str) -> Result<Paper, Error> {
         self.ensure_base_urls().await?;
 
-        for base_url in self.base_urls.as_ref().unwrap() {
-            let pdf_url = self.fetch_paper_by_base_url_and_doi(base_url, &doi).await?;
-            return Ok(pdf_url);
+        let mut failing_urls: Vec<WeightedUrl> = Vec::new();
+        while !self.base_urls.is_empty() {
+            let base_url = &self.base_urls.peek().unwrap().url; // we are guaranteed to have at least one base url.
+            let url = Self::scihub_url_from_base_url_and_doi(base_url, doi)?;
+
+            let result = self.fetch_paper_from_scihub_url(url).await;
+
+            if result.is_ok() {
+                for mut failing_url in failing_urls {
+                    failing_url.weight -= 10;
+                    self.base_urls.push(failing_url);
+                }
+                let mut working_base_url = self.base_urls.peek_mut().unwrap();
+                working_base_url.weight += 1;
+                return result;
+            } else {
+                failing_urls.push(self.base_urls.pop().unwrap())
+            }
         }
+
         Err(Error::Other("Invalid doi or no working sci-hub mirror found"))
     }
     /// Fetches the paper with the given url from sci-hub, automatically fetching current sci-hub domains.
@@ -164,10 +212,26 @@ impl SciHubScraper {
     pub async fn fetch_paper_pdf_url_by_doi(&mut self, doi: &str) -> Result<String, Error> {
         self.ensure_base_urls().await?;
 
-        for base_url in self.base_urls.as_ref().unwrap() {
-            let pdf_url = self.fetch_paper_pdf_url_by_base_url_and_doi(base_url, &doi).await?;
-            return Ok(pdf_url);
+        let mut failing_urls: Vec<WeightedUrl> = Vec::new();
+        while !self.base_urls.is_empty() {
+            let base_url = &self.base_urls.peek().unwrap().url; // we are guaranteed to have at least one base url.
+            let url = Self::scihub_url_from_base_url_and_doi(base_url, doi)?;
+
+            let result = self.fetch_paper_pdf_url_from_scihub_url(url).await;
+
+            if result.is_ok() {
+                for mut failing_url in failing_urls {
+                    failing_url.weight -= 10;
+                    self.base_urls.push(failing_url);
+                }
+                let mut working_base_url = self.base_urls.peek_mut().unwrap();
+                working_base_url.weight += 1;
+                return result;
+            } else {
+                failing_urls.push(self.base_urls.pop().unwrap())
+            }
         }
+
         Err(Error::Other("Invalid doi or no working sci-hub mirror found"))
     }
     /// Fetches the pdf url of the paper with the given url from sci-hub, automatically fetching current sci-hub domains.
@@ -224,4 +288,38 @@ pub struct Paper {
 pub struct PaperVersion {
     pub version: String,
     pub scihub_url: String
+}
+
+pub struct WeightedUrl {
+    url: Url,
+    weight: u32
+}
+impl PartialEq for WeightedUrl {
+    fn eq(&self, other: &Self) -> bool {
+        self.url == other.url
+    }
+}
+impl Eq for WeightedUrl { }
+impl PartialOrd for WeightedUrl {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.weight.partial_cmp(&other.weight)
+    }
+}
+impl Ord for WeightedUrl {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.weight.cmp(&other.weight)
+    }
+}
+impl From<Url> for WeightedUrl {
+    fn from(url: Url) -> Self {
+        WeightedUrl {
+            url,
+            weight: 0
+        }
+    }
+}
+impl Into<Url> for WeightedUrl {
+    fn into(self) -> Url {
+        self.url
+    }
 }

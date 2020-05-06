@@ -10,8 +10,7 @@ fn finds_scihub_base_urls() -> Result<(), Box<dyn std::error::Error>> {
     let mut scihub = SciHubScraper::new();
     let mut runtime = Runtime::new()?;
     runtime.block_on(scihub.fetch_base_urls())?;
-    assert!(scihub.base_urls.is_some());
-    assert!(!scihub.base_urls.as_ref().unwrap().is_empty());
+    assert!(!scihub.base_urls.is_empty());
     Ok(())
 }
 
