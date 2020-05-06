@@ -294,7 +294,7 @@ pub struct PaperVersion {
 }
 
 pub struct WeightedUrl {
-    url: Url,
+    pub url: Url,
     weight: u32
 }
 impl PartialEq for WeightedUrl {
