@@ -59,8 +59,11 @@ impl SciHubScraper {
     pub async fn fetch_base_urls_from_provider(&mut self, scihub_url_provider: Url) -> Result<&BinaryHeap<WeightedUrl>, Error> {
         let document = self.fetch_html_document(scihub_url_provider).await?;
 
-        let link_selector = Selector::parse("a[href]").unwrap();
-        let mut base_urls: Vec<Url> = document.select(&link_selector)
+        lazy_static! {
+            static ref LINK_SELECTOR: Selector = Selector::parse("a[href]").unwrap();
+        }
+
+        let mut base_urls: Vec<Url> = document.select(&LINK_SELECTOR)
             .filter_map(|node| node.value().attr("href"))
             .filter_map(|href| Url::parse(href).ok())
             .filter(|url| url.domain().map_or(false, |e| e.starts_with("sci-hub") && !e.ends_with("now.sh")))
@@ -79,7 +82,7 @@ impl SciHubScraper {
         if self.base_urls.is_empty() {
             self.fetch_base_urls().await?;
             if self.base_urls.is_empty() {
-                return Err(Error::Other("Failed to load sci-hub domains."))
+                return Err(Error::Other("Failed to load sci-hub base urls."))
             }
         }
         Ok(&self.base_urls)
