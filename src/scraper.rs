@@ -32,6 +32,15 @@ impl SciHubScraper {
         SciHubScraper {
             client: Client::new(),
             base_urls: Some(base_urls)
+    /// Generates a scihub paper url from the given base url and doi.
+    pub fn scihub_url_from_base_url_and_doi(base_url: &Url, doi: &str) -> Result<Url, url::ParseError> {
+        base_url.join(doi)
+    }
+    fn convert_protocol_relative_url_to_absolute(relative_url: &str, absolute_url: &Url) -> String {
+        if relative_url.starts_with("//") {
+            return format!("{}:{}", absolute_url.scheme(), relative_url);
+        } else {
+            return String::from(relative_url);
         }
     }
 
@@ -45,12 +54,12 @@ impl SciHubScraper {
         let document = self.fetch_html_document(scihub_url_provider).await?;
 
         let link_selector = Selector::parse("a[href]").unwrap();
-        let mut domains: Vec<Url> = document.select(&link_selector)
+        let mut base_urls: Vec<Url> = document.select(&link_selector)
             .filter_map(|node| node.value().attr("href"))
             .filter_map(|href| Url::parse(href).ok())
             .filter(|url| url.domain().map_or(false, |e| e.starts_with("sci-hub") && !e.ends_with("now.sh")))
             .collect();
-        domains.dedup();
+        base_urls.dedup();
 
         self.base_urls = Some(domains);
         Ok(self.base_urls.as_ref().unwrap())
@@ -69,10 +78,6 @@ impl SciHubScraper {
         }
     }
 
-    /// Generates a scihub paper url from the given base url and doi.
-    pub fn scihub_url_from_base_url_and_doi(base_url: &Url, doi: &str) -> Result<Url, url::ParseError> {
-        base_url.join(doi)
-    }
 
     /// Fetches the paper with the given doi from sci-hub, automatically fetching current sci-hub domains.
     pub async fn fetch_paper_by_doi(&mut self, doi: &str) -> Result<Paper, Error> {
@@ -121,7 +126,7 @@ impl SciHubScraper {
             .filter_map(|attrval| Some(&attrval[attrval.find("'")?+1..attrval.rfind("'")?]))
             .next()
             .ok_or(Error::SciHubParse("Pdf url not found in page."))?;
-        let pdf_url = convert_protocol_relative_url_to_absolute(raw_pdf_url, &url);
+        let pdf_url = Self::convert_protocol_relative_url_to_absolute(raw_pdf_url, &url);
 
         let mut current_version = None;
         let other_versions: Vec<_> = document.select(&VERSIONS_SELECTOR)
@@ -134,11 +139,11 @@ impl SciHubScraper {
                 }
 
                 let version_href = node.value().attr("href")?;
-                let version_url = convert_protocol_relative_url_to_absolute(version_href, &url);
+                let version_url = Self::convert_protocol_relative_url_to_absolute(version_href, &url);
 
                 Some(PaperVersion {
                     version: node.inner_html(),
-                    scihub_url: String::from(version_url)
+                    scihub_url: version_url
                 })
             })
             .collect();
@@ -189,7 +194,7 @@ impl SciHubScraper {
             .ok_or(Error::SciHubParse("Received unexpected response from sci-hub."))?
             .to_str()
             .or(Err(Error::SciHubParse("Received malformed pdf url from sci-hub.")))
-            .map(|pdf_url| String::from(convert_protocol_relative_url_to_absolute(pdf_url, &url)))
+            .map(|pdf_url| Self::convert_protocol_relative_url_to_absolute(pdf_url, &url))
     }
 
     async fn fetch_html_document(&self, url: Url) -> Result<Html, Error> {
@@ -200,14 +205,7 @@ impl SciHubScraper {
             .text().await?;
         Ok(Html::parse_document(&text))
     }
-}
 
-fn convert_protocol_relative_url_to_absolute(relative_url: &str, absolute_url: &Url) -> String {
-    if relative_url.starts_with("//") {
-        return format!("{}:{}", absolute_url.scheme(), relative_url);
-    } else {
-        return String::from(relative_url);
-    }
 }
 
 
