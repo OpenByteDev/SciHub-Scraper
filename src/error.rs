@@ -1,4 +1,4 @@
-use quick_error::{quick_error};
+use quick_error::quick_error;
 
 quick_error! {
     #[derive(Debug)]

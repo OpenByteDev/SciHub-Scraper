@@ -40,14 +40,20 @@ fn fetches_pdf_url_direct() -> Result<(), Box<dyn std::error::Error>> {
     check_pdf_url(&pdf_url, &mut runtime)
 }
 
-fn check_pdf_url(pdf_url: &str, runtime:&mut Runtime) -> Result<(), Box<dyn std::error::Error>> {
+fn check_pdf_url(pdf_url: &str, runtime: &mut Runtime) -> Result<(), Box<dyn std::error::Error>> {
     let pdf_url = Url::parse(pdf_url)?;
-    assert!(pdf_url.path().ends_with(".pdf"), "Pdf url path does not end with '.pdf'");
+    assert!(
+        pdf_url.path().ends_with(".pdf"),
+        "Pdf url path does not end with '.pdf'"
+    );
     assert_eq!(
-        runtime.block_on(reqwest::get(pdf_url))?
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .unwrap()
-        .to_str()?, "application/pdf");
+        runtime
+            .block_on(reqwest::get(pdf_url))?
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .unwrap()
+            .to_str()?,
+        "application/pdf"
+    );
     Ok(())
 }

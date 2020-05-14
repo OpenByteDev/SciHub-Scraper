@@ -1,10 +1,10 @@
 //! # SciHub Scraper
-//! 
+//!
 //! SciHub Scraper can be used to scrap paper info including its pdf url from sci-hub.
 //!  
-//! Sci-hub domains are automatically fetched from [sci-hub.now.sh](https://sci-hub.now.sh/), 
+//! Sci-hub domains are automatically fetched from [sci-hub.now.sh](https://sci-hub.now.sh/),
 //! but can also be manually provided by using `SciHubScraper::with_base_urls`
-//! 
+//!
 //! ## Usage
 //! To extract all available information about a paper use `SciHubScraper.fetch_paper_by_doi` and associated methods:
 //! ```rust
@@ -18,10 +18,10 @@
 //! # Ok(())
 //! # }
 //! ```
-//! 
+//!
 //! Alernatively `SciHubScraper.fetch_paper_pdf_url_by_doi` and associated methods can also be used to extract only the pdf url of a paper.
 //! It extracts the url using a different method and is therefore faster but provides no additional information.
-//! 
+//!
 //! ```rust
 //! # use scihub_scraper::{SciHubScraper, Error};
 //! #

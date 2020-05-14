@@ -1,22 +1,20 @@
-#[macro_use]
-extern crate lazy_static;
-
-use reqwest::{Client, header, redirect};
+use reqwest::{header, redirect, Client};
 use scraper::{Html, Selector};
-use url::Url;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
+use url::Url;
+use crate::error::Error;
 
 pub struct SciHubScraper {
     client: Client,
-    pub base_urls: BinaryHeap<WeightedUrl>
+    pub base_urls: BinaryHeap<WeightedUrl>,
 }
 
 impl SciHubScraper {
     pub fn new() -> Self {
         SciHubScraper {
             client: Client::new(),
-            base_urls: BinaryHeap::new()
+            base_urls: BinaryHeap::new(),
         }
     }
     /// Creates a new `SciHubScraper` with the given sci-hub base url. (This will disable the automatic sci-hub domain detection).
@@ -27,12 +25,15 @@ impl SciHubScraper {
     pub fn with_base_urls(base_urls: Vec<Url>) -> Self {
         SciHubScraper {
             client: Client::new(),
-            base_urls: Self::base_urls_as_heap(base_urls)
+            base_urls: Self::base_urls_as_heap(base_urls),
         }
     }
 
     /// Generates a scihub paper url from the given base url and doi.
-    pub fn scihub_url_from_base_url_and_doi(base_url: &Url, doi: &str) -> Result<Url, url::ParseError> {
+    pub fn scihub_url_from_base_url_and_doi(
+        base_url: &Url,
+        doi: &str,
+    ) -> Result<Url, url::ParseError> {
         base_url.join(doi)
     }
     fn convert_protocol_relative_url_to_absolute(relative_url: &str, absolute_url: &Url) -> String {
@@ -56,20 +57,28 @@ impl SciHubScraper {
         self.fetch_base_urls_from_provider(scihub_now_url).await
     }
     /// Fetches a list of base urls from the given provider and adds them to the base url heap.
-    pub async fn fetch_base_urls_from_provider(&mut self, scihub_url_provider: Url) -> Result<&BinaryHeap<WeightedUrl>, Error> {
+    pub async fn fetch_base_urls_from_provider(
+        &mut self,
+        scihub_url_provider: Url,
+    ) -> Result<&BinaryHeap<WeightedUrl>, Error> {
         let document = self.fetch_html_document(scihub_url_provider).await?;
 
         lazy_static! {
             static ref LINK_SELECTOR: Selector = Selector::parse("a[href]").unwrap();
         }
 
-        let mut base_urls: Vec<Url> = document.select(&LINK_SELECTOR)
+        let mut base_urls: Vec<Url> = document
+            .select(&LINK_SELECTOR)
             .filter_map(|node| node.value().attr("href"))
             .filter_map(|href| Url::parse(href).ok())
-            .filter(|url| url.domain().map_or(false, |e| e.starts_with("sci-hub") && !e.ends_with("now.sh")))
+            .filter(|url| {
+                url.domain().map_or(false, |e| {
+                    e.starts_with("sci-hub") && !e.ends_with("now.sh")
+                })
+            })
             .collect();
         base_urls.dedup();
-        
+
         self.base_urls.reserve(base_urls.len());
         for base_url in base_urls {
             self.base_urls.push(base_url.into());
@@ -82,7 +91,7 @@ impl SciHubScraper {
         if self.base_urls.is_empty() {
             self.fetch_base_urls().await?;
             if self.base_urls.is_empty() {
-                return Err(Error::Other("Failed to load sci-hub base urls."))
+                return Err(Error::Other("Failed to load sci-hub base urls."));
             }
         }
         Ok(&self.base_urls)
@@ -138,14 +147,20 @@ impl SciHubScraper {
             }
         }
 
-        Err(Error::Other("Invalid doi or no working sci-hub mirror found"))
+        Err(Error::Other(
+            "Invalid doi or no working sci-hub mirror found",
+        ))
     }
     /// Fetches the paper with the given url from sci-hub, automatically fetching current sci-hub domains.
     pub async fn fetch_paper_by_paper_url(&mut self, url: &str) -> Result<Paper, Error> {
         self.fetch_paper_by_doi(url).await
     }
     /// Fetches the paper with the given doi using the given sci-hub base url.
-    pub async fn fetch_paper_by_base_url_and_doi(&self, base_url: &Url, doi: &str) -> Result<Paper, Error> {
+    pub async fn fetch_paper_by_base_url_and_doi(
+        &self,
+        base_url: &Url,
+        doi: &str,
+    ) -> Result<Paper, Error> {
         let url = Self::scihub_url_from_base_url_and_doi(base_url, doi)?;
         self.fetch_paper_from_scihub_url(url).await
     }
@@ -154,51 +169,60 @@ impl SciHubScraper {
         let document = self.fetch_html_document(url.clone()).await?;
 
         lazy_static! {
-            static ref TITLE_SELECTOR:Selector = Selector::parse("head title").unwrap();
-            static ref DOWNLOAD_BUTTON_SELECTOR:Selector = Selector::parse("#buttons a[onclick]").unwrap();
-            static ref VERSIONS_SELECTOR:Selector = Selector::parse("#versions a[href]").unwrap();
-            static ref BOLD_SELECTOR:Selector = Selector::parse("b").unwrap();
+            static ref TITLE_SELECTOR: Selector = Selector::parse("head title").unwrap();
+            static ref DOWNLOAD_BUTTON_SELECTOR: Selector =
+                Selector::parse("#buttons a[onclick]").unwrap();
+            static ref VERSIONS_SELECTOR: Selector = Selector::parse("#versions a[href]").unwrap();
+            static ref BOLD_SELECTOR: Selector = Selector::parse("b").unwrap();
         }
 
-        let (doi, paper_title) = document.select(&TITLE_SELECTOR)
+        let (doi, paper_title) = document
+            .select(&TITLE_SELECTOR)
             .filter_map(|node| {
                 let title = node.inner_html();
                 let mut iter = title.rsplit("|").map(|e| e.trim());
                 match (iter.next(), iter.next()) {
-                    (Some(doi), Some(page_title)) => Some((String::from(doi), String::from(page_title))),
+                    (Some(doi), Some(page_title)) => {
+                        Some((String::from(doi), String::from(page_title)))
+                    }
                     _ => None,
                 }
             })
             .next()
             .ok_or(Error::SciHubParse("Paper info not found in page."))?;
 
-        let raw_pdf_url = document.select(&DOWNLOAD_BUTTON_SELECTOR)
+        let raw_pdf_url = document
+            .select(&DOWNLOAD_BUTTON_SELECTOR)
             .filter_map(|node| node.value().attr("onclick"))
-            .filter_map(|attrval| Some(&attrval[attrval.find("'")?+1..attrval.rfind("'")?]))
+            .filter_map(|attrval| Some(&attrval[attrval.find("'")? + 1..attrval.rfind("'")?]))
             .next()
             .ok_or(Error::SciHubParse("Pdf url not found in page."))?;
         let pdf_url = Self::convert_protocol_relative_url_to_absolute(raw_pdf_url, &url);
 
         let mut current_version = None;
-        let other_versions: Vec<_> = document.select(&VERSIONS_SELECTOR)
+        let other_versions: Vec<_> = document
+            .select(&VERSIONS_SELECTOR)
             .filter_map(|node| {
                 if current_version.is_none() {
-                    if let Some(version_str) = node.select(&BOLD_SELECTOR).next().map(|b| b.inner_html()) {
+                    if let Some(version_str) =
+                        node.select(&BOLD_SELECTOR).next().map(|b| b.inner_html())
+                    {
                         current_version = Some(version_str);
                         return None; // do not include current version
                     }
                 }
 
                 let version_href = node.value().attr("href")?;
-                let version_url = Self::convert_protocol_relative_url_to_absolute(version_href, &url);
+                let version_url =
+                    Self::convert_protocol_relative_url_to_absolute(version_href, &url);
 
                 Some(PaperVersion {
                     version: node.inner_html(),
-                    scihub_url: version_url
+                    scihub_url: version_url,
                 })
             })
             .collect();
-        
+
         let current_version = current_version.unwrap_or(String::from("current"));
 
         Ok(Paper {
@@ -207,7 +231,7 @@ impl SciHubScraper {
             title: paper_title,
             version: current_version,
             download_url: pdf_url,
-            other_versions: other_versions
+            other_versions: other_versions,
         })
     }
 
@@ -235,14 +259,20 @@ impl SciHubScraper {
             }
         }
 
-        Err(Error::Other("Invalid doi or no working sci-hub mirror found"))
+        Err(Error::Other(
+            "Invalid doi or no working sci-hub mirror found",
+        ))
     }
     /// Fetches the pdf url of the paper with the given url from sci-hub, automatically fetching current sci-hub domains.
     pub async fn fetch_paper_pdf_url_by_paper_url(&mut self, url: &str) -> Result<String, Error> {
         self.fetch_paper_pdf_url_by_doi(url).await
     }
     /// Fetches the pdf url of the paper with the given doi using the given sci-hub base url.
-    pub async fn fetch_paper_pdf_url_by_base_url_and_doi(&self, base_url: &Url, doi: &str) -> Result<String, Error> {
+    pub async fn fetch_paper_pdf_url_by_base_url_and_doi(
+        &self,
+        base_url: &Url,
+        doi: &str,
+    ) -> Result<String, Error> {
         let url = Self::scihub_url_from_base_url_and_doi(base_url, doi)?;
         self.fetch_paper_pdf_url_from_scihub_url(url).await
     }
@@ -251,30 +281,41 @@ impl SciHubScraper {
         let client = Client::builder()
             .redirect(redirect::Policy::none())
             .build()?;
-        
-        let response = client.get(url.clone())
-            .header(header::USER_AGENT, "Mozilla/5.0 (Android 4.4; Mobile; rv:42.0) Gecko/42.0 Firefox/42.0") // "disguise" as mobile
-            .send().await?;
-        
-        response.headers()
+
+        let response = client
+            .get(url.clone())
+            .header(
+                header::USER_AGENT,
+                "Mozilla/5.0 (Android 4.4; Mobile; rv:42.0) Gecko/42.0 Firefox/42.0",
+            ) // "disguise" as mobile
+            .send()
+            .await?;
+
+        response
+            .headers()
             .get(header::LOCATION)
-            .ok_or(Error::SciHubParse("Received unexpected response from sci-hub."))?
+            .ok_or(Error::SciHubParse(
+                "Received unexpected response from sci-hub.",
+            ))?
             .to_str()
-            .or(Err(Error::SciHubParse("Received malformed pdf url from sci-hub.")))
+            .or(Err(Error::SciHubParse(
+                "Received malformed pdf url from sci-hub.",
+            )))
             .map(|pdf_url| Self::convert_protocol_relative_url_to_absolute(pdf_url, &url))
     }
 
     async fn fetch_html_document(&self, url: Url) -> Result<Html, Error> {
-        let text = self.client
+        let text = self
+            .client
             .get(url)
             .header(header::ACCEPT, "text/html")
-            .send().await?
-            .text().await?;
+            .send()
+            .await?
+            .text()
+            .await?;
         Ok(Html::parse_document(&text))
     }
-
 }
-
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Paper {
@@ -284,25 +325,25 @@ pub struct Paper {
     pub version: String,
     pub download_url: String,
     // pub citation: String,
-    pub other_versions: Vec<PaperVersion>
+    pub other_versions: Vec<PaperVersion>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PaperVersion {
     pub version: String,
-    pub scihub_url: String
+    pub scihub_url: String,
 }
 
 pub struct WeightedUrl {
     pub url: Url,
-    weight: u32
+    weight: u32,
 }
 impl PartialEq for WeightedUrl {
     fn eq(&self, other: &Self) -> bool {
         self.url == other.url
     }
 }
-impl Eq for WeightedUrl { }
+impl Eq for WeightedUrl {}
 impl PartialOrd for WeightedUrl {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.weight.partial_cmp(&other.weight)
@@ -315,10 +356,7 @@ impl Ord for WeightedUrl {
 }
 impl From<Url> for WeightedUrl {
     fn from(url: Url) -> Self {
-        WeightedUrl {
-            url,
-            weight: 0
-        }
+        WeightedUrl { url, weight: 0 }
     }
 }
 impl Into<Url> for WeightedUrl {
