@@ -1,6 +1,6 @@
 [package]
 name = "scihub-scraper"
-version = "0.4.1"
+version = "0.4.2"
 description = "Scraps paper informations from sci-hub."
 readme = "README.md"
 repository = "https://github.com/OpenByteDev/scihub-scraper"
@@ -11,7 +11,7 @@ keywords = ["scraper", "sci-hub", "web"]
 
 [dependencies]
 reqwest = "0.10"
-scraper = "0.11"
+scraper = "0.12"
 quick-error = "1.2"
 url = "2.1"
 lazy_static = "1.4"
