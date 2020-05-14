@@ -33,6 +33,11 @@
 //! # }
 //! ```
 
-// TODO make rusty!
-include!("scraper.rs");
-include!("error.rs");
+#[macro_use]
+extern crate lazy_static;
+
+pub mod error;
+pub mod scraper;
+
+pub use crate::error::*;
+pub use crate::scraper::*;
