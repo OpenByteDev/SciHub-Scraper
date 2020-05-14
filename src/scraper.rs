@@ -1,16 +1,23 @@
+use crate::error::Error;
 use reqwest::{header, redirect, Client};
 use scraper::{Html, Selector};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use url::Url;
-use crate::error::Error;
 
 pub struct SciHubScraper {
     client: Client,
     pub base_urls: BinaryHeap<WeightedUrl>,
 }
 
+impl Default for SciHubScraper {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SciHubScraper {
+    #[must_use]
     pub fn new() -> Self {
         SciHubScraper {
             client: Client::new(),
@@ -18,10 +25,12 @@ impl SciHubScraper {
         }
     }
     /// Creates a new `SciHubScraper` with the given sci-hub base url. (This will disable the automatic sci-hub domain detection).
+    #[must_use]
     pub fn with_base_url(base_url: Url) -> Self {
         Self::with_base_urls(vec![base_url])
     }
     /// Creates a new `SciHubScraper` with the given sci-hub base urls. (This will disable the automatic sci-hub domain detection).
+    #[must_use]
     pub fn with_base_urls(base_urls: Vec<Url>) -> Self {
         SciHubScraper {
             client: Client::new(),
@@ -38,9 +47,9 @@ impl SciHubScraper {
     }
     fn convert_protocol_relative_url_to_absolute(relative_url: &str, absolute_url: &Url) -> String {
         if relative_url.starts_with("//") {
-            return format!("{}:{}", absolute_url.scheme(), relative_url);
+            format!("{}:{}", absolute_url.scheme(), relative_url)
         } else {
-            return String::from(relative_url);
+            relative_url.to_string()
         }
     }
     fn base_urls_as_heap(base_urls: Vec<Url>) -> BinaryHeap<WeightedUrl> {
@@ -178,23 +187,22 @@ impl SciHubScraper {
 
         let (doi, paper_title) = document
             .select(&TITLE_SELECTOR)
-            .filter_map(|node| {
+            .find_map(|node| {
                 let title = node.inner_html();
-                let mut iter = title.rsplit("|").map(|e| e.trim());
+                let mut iter = title.rsplit('|').map(str::trim);
                 match (iter.next(), iter.next()) {
                     (Some(doi), Some(page_title)) => {
-                        Some((String::from(doi), String::from(page_title)))
+                        Some((doi.to_string(), page_title.to_string()))
                     }
                     _ => None,
                 }
             })
-            .next()
             .ok_or(Error::SciHubParse("Paper info not found in page."))?;
 
         let raw_pdf_url = document
             .select(&DOWNLOAD_BUTTON_SELECTOR)
             .filter_map(|node| node.value().attr("onclick"))
-            .filter_map(|attrval| Some(&attrval[attrval.find("'")? + 1..attrval.rfind("'")?]))
+            .filter_map(|attrval| Some(&attrval[attrval.find('\'')? + 1..attrval.rfind('\'')?]))
             .next()
             .ok_or(Error::SciHubParse("Pdf url not found in page."))?;
         let pdf_url = Self::convert_protocol_relative_url_to_absolute(raw_pdf_url, &url);
@@ -223,15 +231,15 @@ impl SciHubScraper {
             })
             .collect();
 
-        let current_version = current_version.unwrap_or(String::from("current"));
+        let current_version = current_version.unwrap_or_else(|| "current".to_string());
 
         Ok(Paper {
             scihub_url: url,
-            doi: doi,
+            doi,
             title: paper_title,
             version: current_version,
             download_url: pdf_url,
-            other_versions: other_versions,
+            other_versions,
         })
     }
 
