@@ -1,8 +1,8 @@
 # SciHub Scraper
 
-[![crates.io](https://img.shields.io/crates/v/scihub_scraper.svg)](https://crates.io/crates/scihub_scraper)
-[![Documentation](https://docs.rs/scihub_scraper/badge.svg)](https://docs.rs/scihub_scraper)
-[![MIT](https://img.shields.io/crates/l/scihub_scraper.svg)](./LICENSE)
+[![crates.io](https://img.shields.io/crates/v/scihub-scraper.svg)](https://crates.io/crates/scihub-scraper)
+[![Documentation](https://docs.rs/scihub-scraper/badge.svg)](https://docs.rs/scihub-scraper)
+[![MIT](https://img.shields.io/crates/l/scihub-scraper.svg)](./LICENSE)
 
 SciHub Scraper can be used to scrap paper info including its pdf url from sci-hub.
  
