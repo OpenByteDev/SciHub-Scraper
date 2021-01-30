@@ -256,7 +256,7 @@ impl SciHubScraper {
 
             if result.is_ok() {
                 for mut failing_url in failing_urls {
-                    failing_url.weight -= 10;
+                    failing_url.weight -= 1;
                     self.base_urls.push(failing_url);
                 }
                 let mut working_base_url = self.base_urls.peek_mut().unwrap();
@@ -352,7 +352,7 @@ pub struct PaperVersion {
 
 pub struct WeightedUrl {
     pub url: Url,
-    weight: u32,
+    weight: i32,
 }
 impl PartialEq for WeightedUrl {
     fn eq(&self, other: &Self) -> bool {
