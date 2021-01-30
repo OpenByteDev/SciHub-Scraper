@@ -302,20 +302,18 @@ impl SciHubScraper {
         response
             .headers()
             .get(header::LOCATION)
-            .ok_or_else(|| Error::SciHubParse(
+            .ok_or(Error::SciHubParse(
                 "Received unexpected response from sci-hub.",
             ))?
             .to_str()
-            .or_else(|_| Err(Error::SciHubParse(
-                "Received malformed pdf url from sci-hub.",
-            )))
+            .map_err(|_| Error::SciHubParse("Received malformed pdf url from sci-hub."))
             .map(|pdf_url| Self::convert_protocol_relative_url_to_absolute(pdf_url, &url))
             .and_then(|url_str| Url::parse(&url_str).map_err(|e| e.into()))
             .and_then(|url| {
                 if url.domain().map_or(false, |e| e.contains("sci-hub")) {
-                    return Ok(url);
+                    Ok(url)
                 } else {
-                    return Err(Error::Other("Redirected to invalid site."));
+                    Err(Error::Other("Redirected to invalid site."))
                 }
             })
     }
