@@ -29,7 +29,7 @@ fn fetches_paper() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(paper.doi, TEST_DOI);
     assert_eq!(paper.title, TEST_TITLE);
     assert!(!paper.other_versions.is_empty());
-    check_pdf_url(&paper.download_url, &mut runtime)
+    check_pdf_url(paper.download_url, &mut runtime)
 }
 
 #[test]
@@ -37,11 +37,10 @@ fn fetches_pdf_url_direct() -> Result<(), Box<dyn std::error::Error>> {
     let mut scihub = SciHubScraper::new();
     let mut runtime = Runtime::new()?;
     let pdf_url = runtime.block_on(scihub.fetch_paper_pdf_url_by_doi(TEST_DOI))?;
-    check_pdf_url(&pdf_url, &mut runtime)
+    check_pdf_url(pdf_url, &mut runtime)
 }
 
-fn check_pdf_url(pdf_url: &str, runtime: &mut Runtime) -> Result<(), Box<dyn std::error::Error>> {
-    let pdf_url = Url::parse(pdf_url)?;
+fn check_pdf_url(pdf_url: Url, runtime: &mut Runtime) -> Result<(), Box<dyn std::error::Error>> {
     assert!(
         pdf_url.path().ends_with(".pdf"),
         "Pdf url path does not end with '.pdf'"

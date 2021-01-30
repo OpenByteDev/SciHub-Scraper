@@ -226,7 +226,7 @@ impl SciHubScraper {
 
                 Some(PaperVersion {
                     version: node.inner_html(),
-                    scihub_url: version_url,
+                    scihub_url: Url::parse(&version_url).ok()?,
                 })
             })
             .collect();
@@ -238,13 +238,13 @@ impl SciHubScraper {
             doi,
             title: paper_title,
             version: current_version,
-            download_url: pdf_url,
+            download_url: Url::parse(&pdf_url)?,
             other_versions,
         })
     }
 
     /// Fetches the pdf url of the paper with the given doi from sci-hub, automatically fetching current sci-hub domains.
-    pub async fn fetch_paper_pdf_url_by_doi(&mut self, doi: &str) -> Result<String, Error> {
+    pub async fn fetch_paper_pdf_url_by_doi(&mut self, doi: &str) -> Result<Url, Error> {
         self.ensure_base_urls().await?;
 
         let mut failing_urls: Vec<WeightedUrl> = Vec::new();
@@ -272,7 +272,7 @@ impl SciHubScraper {
         ))
     }
     /// Fetches the pdf url of the paper with the given url from sci-hub, automatically fetching current sci-hub domains.
-    pub async fn fetch_paper_pdf_url_by_paper_url(&mut self, url: &str) -> Result<String, Error> {
+    pub async fn fetch_paper_pdf_url_by_paper_url(&mut self, url: &str) -> Result<Url, Error> {
         self.fetch_paper_pdf_url_by_doi(url).await
     }
     /// Fetches the pdf url of the paper with the given doi using the given sci-hub base url.
@@ -280,12 +280,12 @@ impl SciHubScraper {
         &self,
         base_url: &Url,
         doi: &str,
-    ) -> Result<String, Error> {
+    ) -> Result<Url, Error> {
         let url = Self::scihub_url_from_base_url_and_doi(base_url, doi)?;
         self.fetch_paper_pdf_url_from_scihub_url(url).await
     }
     /// Fetches the pdf url of the paper from the given scihub url.
-    pub async fn fetch_paper_pdf_url_from_scihub_url(&self, url: Url) -> Result<String, Error> {
+    pub async fn fetch_paper_pdf_url_from_scihub_url(&self, url: Url) -> Result<Url, Error> {
         let client = Client::builder()
             .redirect(redirect::Policy::none())
             .build()?;
@@ -302,14 +302,22 @@ impl SciHubScraper {
         response
             .headers()
             .get(header::LOCATION)
-            .ok_or(Error::SciHubParse(
+            .ok_or_else(|| Error::SciHubParse(
                 "Received unexpected response from sci-hub.",
             ))?
             .to_str()
-            .or(Err(Error::SciHubParse(
+            .or_else(|_| Err(Error::SciHubParse(
                 "Received malformed pdf url from sci-hub.",
             )))
             .map(|pdf_url| Self::convert_protocol_relative_url_to_absolute(pdf_url, &url))
+            .and_then(|url_str| Url::parse(&url_str).map_err(|e| e.into()))
+            .and_then(|url| {
+                if url.domain().map_or(false, |e| e.contains("sci-hub")) {
+                    return Ok(url);
+                } else {
+                    return Err(Error::Other("Redirected to invalid site."));
+                }
+            })
     }
 
     async fn fetch_html_document(&self, url: Url) -> Result<Html, Error> {
@@ -331,7 +339,7 @@ pub struct Paper {
     pub doi: String,
     pub title: String,
     pub version: String,
-    pub download_url: String,
+    pub download_url: Url,
     // pub citation: String,
     pub other_versions: Vec<PaperVersion>,
 }
@@ -339,7 +347,7 @@ pub struct Paper {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PaperVersion {
     pub version: String,
-    pub scihub_url: String,
+    pub scihub_url: Url,
 }
 
 pub struct WeightedUrl {
