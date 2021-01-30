@@ -6,12 +6,12 @@ quick_error! {
         Reqwest(err: reqwest::Error) {
             from()
             display("reqwest error: {}", err)
-            cause(err)
+            source(err)
         }
         UrlParse(err: url::ParseError) {
             from()
             display("url parse error: {}", err)
-            cause(err)
+            source(err)
         }
         Other(descr: &'static str) {
             display("error {}", descr)

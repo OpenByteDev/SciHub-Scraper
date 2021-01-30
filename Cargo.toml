@@ -10,11 +10,11 @@ edition = "2018"
 keywords = ["scraper", "sci-hub", "web"]
 
 [dependencies]
-reqwest = "0.10"
+reqwest = "0.11"
 scraper = "0.12"
-quick-error = "1.2"
-url = "2.1"
+quick-error = "2.0"
+url = "2.2"
 lazy_static = "1.4"
 
 [dev-dependencies]
-tokio = "0.2"
+tokio = { version = "1.1", features = ["rt", "rt-multi-thread"] }

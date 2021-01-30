@@ -8,7 +8,7 @@ const TEST_TITLE: &str = "Capsaicinoids: Pungency beyond Capsicum. Trends in Pla
 #[test]
 fn finds_scihub_base_urls() -> Result<(), Box<dyn std::error::Error>> {
     let mut scihub = SciHubScraper::new();
-    let mut runtime = Runtime::new()?;
+    let runtime = Runtime::new()?;
     runtime.block_on(scihub.fetch_base_urls())?;
     assert!(!scihub.base_urls.is_empty());
     Ok(())
