@@ -295,7 +295,7 @@ impl SciHubScraper {
             .header(
                 header::USER_AGENT,
                 "Mozilla/5.0 (Android 4.4; Mobile; rv:42.0) Gecko/42.0 Firefox/42.0",
-            ) // "disguise" as mobile
+            ) // "disguise" as mobile (mobile page allows easier scraping)
             .send()
             .await?;
 
