@@ -2,7 +2,8 @@
 
 [![crates.io](https://img.shields.io/crates/v/scihub-scraper.svg)](https://crates.io/crates/scihub-scraper)
 [![Documentation](https://docs.rs/scihub-scraper/badge.svg)](https://docs.rs/scihub-scraper)
-[![MIT](https://img.shields.io/crates/l/scihub-scraper.svg)](./LICENSE)
+[![Dependency Status](https://deps.rs/repo/github/openbytedev/scihub-scraper](https://deps.rs/repo/github/openbytedev/scihub-scraper)
+[![MIT](https://img.shields.io/crates/l/scihub-scraper.svg)](https://github.com/OpenByteDev/SciHub-Scraper/blob/master/LICENSE)
 
 SciHub Scraper can be used to scrap paper info including its pdf url from sci-hub.
  
@@ -28,4 +29,4 @@ println!("PDF Url = {}", pdf_url);
 ```
 
 ## License
-Licensed under MIT license ([LICENSE](./LICENSE) or http://opensource.org/licenses/MIT)
+Licensed under MIT license ([LICENSE](https://github.com/OpenByteDev/SciHub-Scraper/blob/master/LICENSE) or http://opensource.org/licenses/MIT)
