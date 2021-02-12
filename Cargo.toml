@@ -1,6 +1,6 @@
 [package]
 name = "scihub-scraper"
-version = "0.5.1"
+version = "0.5.2"
 description = "Scraps paper informations from sci-hub."
 readme = "README.md"
 repository = "https://github.com/OpenByteDev/scihub-scraper"
