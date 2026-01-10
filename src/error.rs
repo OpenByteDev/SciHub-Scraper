@@ -1,23 +1,34 @@
-use quick_error::quick_error;
+use thiserror::Error;
 
-quick_error! {
-    #[derive(Debug)]
-    pub enum Error {
-        Reqwest(err: reqwest::Error) {
-            from()
-            display("reqwest error: {}", err)
-            source(err)
-        }
-        UrlParse(err: url::ParseError) {
-            from()
-            display("url parse error: {}", err)
-            source(err)
-        }
-        Other(descr: &'static str) {
-            display("error {}", descr)
-        }
-        SciHubParse(descr: &'static str) {
-            display("error {}", descr)
-        }
-    }
+#[derive(Debug, Error)]
+pub enum FetchPaperError {
+    #[error("error during network request: {0}")]
+    Network(#[from] reqwest::Error),
+
+    #[error("failed to parse url: {0}")]
+    UrlParse(#[from] url::ParseError),
+
+    #[error("received malformed pdf url from sci-hub")]
+    MalformedPdfUrl,
+
+    #[error("found no pdf url on sci-hub")]
+    MissingPdfUrl,
+
+    #[error("found no paper ingo on sci-hub")]
+    MissingPaperInfo,
+
+    #[error("redirected to invalid site")]
+    InvalidRedirect,
+}
+
+#[derive(Debug, Error)]
+pub enum FetchBaseUrlError {
+    #[error("error during network request: {0}")]
+    Reqwest(#[from] reqwest::Error),
+
+    #[error("failed to parse url: {0}")]
+    UrlParse(#[from] url::ParseError),
+
+    #[error("no base urls found in provider(s)")]
+    NoneFound,
 }

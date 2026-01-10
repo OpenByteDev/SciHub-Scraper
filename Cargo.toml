@@ -1,20 +1,21 @@
 [package]
 name = "scihub-scraper"
-version = "0.5.2"
+version = "0.6.0"
 description = "Scraps paper informations from sci-hub."
 readme = "README.md"
 repository = "https://github.com/OpenByteDev/scihub-scraper"
 license = "MIT"
 authors = ["OpenByte <development.openbyte@gmail.com>"]
-edition = "2018"
+edition = "2024"
 keywords = ["scraper", "sci-hub", "web"]
 
 [dependencies]
-reqwest = "0.11"
-scraper = "0.12"
-quick-error = "2.0"
-url = "2.2"
-lazy_static = "1.4"
+reqwest = "0.13"
+scraper = "0.25"
+thiserror = "2.0"
+url = "2.5"
+lazy_static = "1.0"
+nonempty = "0.12"
 
 [dev-dependencies]
-tokio = { version = "1.2", features = ["rt", "rt-multi-thread"] }
+tokio = { version = "1.49", features = ["rt", "rt-multi-thread"] }
