@@ -1,39 +1,29 @@
 //! # SciHub Scraper
 //!
 //! SciHub Scraper can be used to scrap paper info including its pdf url from sci-hub.
-//!  
-//! Sci-hub domains are automatically fetched from [sci-hub.now.sh](https://sci-hub.now.sh/),
-//! but can also be manually provided by using `Scraper::with_base_urls`
 //!
 //! ## Usage
-//! To extract all available information about a paper use `Scraper.fetch_paper_by_doi` and associated methods:
+//! To fetch information about a paper use [`Scraper::fetch_paper_by_doi`]:
 //! ```rust
-//! # use scihub_scraper::{Scraper, Error};
-//! #
-//! # async fn run() -> Result<(), Error> {
-//! let mut scraper = Scraper::new();
-//! let paper = scraper.fetch_paper_by_doi("10.1016/j.tplants.2018.11.001").await?;
+//! # use scihub_scraper::Scraper;
+//! # async fn run() {
+//! let mut scraper = Scraper::with_auto_detected_base_urls().await.unwrap();
+//! let paper = scraper.fetch_paper_by_doi("10.1016/j.tplants.2018.11.001").await.unwrap();
 //! println!("Title = {}", paper.title);
 //! println!("PDF Url = {}", paper.download_url);
-//! # Ok(())
+//! # }
+//! # use tokio::runtime::Runtime;
+//! # fn main() {
+//! # let mut runtime = Runtime::new().unwrap();
+//! # runtime.block_on(run());
 //! # }
 //! ```
 //!
-//! Alernatively `Scraper.fetch_paper_pdf_url_by_doi` and associated methods can also be used to extract only the pdf url of a paper.
-//! It extracts the url using a different method and is therefore faster but provides no additional information.
-//!
-//! ```rust
-//! # use scihub_scraper::{Scraper, Error};
-//! #
-//! # async fn run() -> Result<(), Error> {
-//! let mut scraper = Scraper::new();
-//! let pdf_url = scraper.fetch_paper_pdf_url_by_doi("10.1016/j.tplants.2018.11.001").await?;
-//! println!("PDF Url = {}", pdf_url);
-//! # Ok(())
-//! # }
-//! ```
+//! Sci-hub domains can be automatically fetched with [`Scraper::with_auto_detected_base_urls`],
+//! or manually provided by using [`Scraper::with_base_urls`].
 
 pub mod error;
 pub mod scraper;
+mod url_pool;
 
 pub use crate::{error::*, scraper::*};

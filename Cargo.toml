@@ -14,7 +14,6 @@ reqwest = "0.13"
 scraper = "0.25"
 thiserror = "2.0"
 url = "2.5"
-lazy_static = "1.0"
 nonempty = "0.12"
 
 [dev-dependencies]

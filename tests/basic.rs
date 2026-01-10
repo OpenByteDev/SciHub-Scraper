@@ -15,12 +15,6 @@ fn finds_scihub_base_urls() {
 }
 
 #[test]
-fn creates_valid_scihub_urls() {
-    let base_url = Url::parse("http://sci-hub.test").unwrap();
-    Scraper::scihub_url_from_base_url_and_doi(&base_url, TEST_DOI).unwrap();
-}
-
-#[test]
 fn fetches_paper() {
     let mut runtime = Runtime::new().unwrap();
     let mut scihub = runtime
@@ -33,18 +27,6 @@ fn fetches_paper() {
     assert_eq!(paper.title, TEST_TITLE);
     assert!(!paper.other_versions.is_empty());
     check_pdf_url(paper.download_url, &mut runtime);
-}
-
-#[test]
-fn fetches_pdf_url_direct() {
-    let mut runtime = Runtime::new().unwrap();
-    let mut scihub = runtime
-        .block_on(Scraper::with_auto_detected_base_urls())
-        .unwrap();
-    let pdf_url = runtime
-        .block_on(scihub.fetch_paper_pdf_url_by_doi(TEST_DOI))
-        .unwrap();
-    check_pdf_url(pdf_url, &mut runtime);
 }
 
 fn check_pdf_url(pdf_url: Url, runtime: &mut Runtime) {

@@ -1,120 +1,99 @@
-use crate::error::{FetchBaseUrlError, FetchPaperError};
+use crate::{
+    error::{FetchBaseUrlError, FetchPaperError},
+    url_pool::UrlPool,
+};
 use nonempty::NonEmpty;
-use reqwest::{Client, header, redirect};
+use reqwest::{Client, header};
 use scraper::{Html, Selector};
-use std::{cmp::Ordering, collections::BinaryHeap};
+use std::sync::OnceLock;
 use url::Url;
-use lazy_static::lazy_static;
+
+fn title_selector() -> &'static Selector {
+    static CELL: OnceLock<Selector> = OnceLock::new();
+    CELL.get_or_init(|| Selector::parse("head title").unwrap())
+}
+fn download_selector() -> &'static Selector {
+    static CELL: OnceLock<Selector> = OnceLock::new();
+    CELL.get_or_init(|| Selector::parse("#buttons [onclick]").unwrap())
+}
+fn versions_selector() -> &'static Selector {
+    static CELL: OnceLock<Selector> = OnceLock::new();
+    CELL.get_or_init(|| Selector::parse("#versions a[href]").unwrap())
+}
+fn bold_selector() -> &'static Selector {
+    static CELL: OnceLock<Selector> = OnceLock::new();
+    CELL.get_or_init(|| Selector::parse("b").unwrap())
+}
+fn link_selector() -> &'static Selector {
+    static CELL: OnceLock<Selector> = OnceLock::new();
+    CELL.get_or_init(|| Selector::parse("a[href]").unwrap())
+}
 
 #[derive(Debug)]
 pub struct Scraper {
     client: Client,
-    pub base_urls: BinaryHeap<WeightedUrl>,
+    pool: UrlPool,
 }
 
 impl Scraper {
-    /// Creates a new [`SciHubScraper`] with the given sci-hub base url.
+    /// Creates a new [`Scraper`] with the given scihub base url.
     #[must_use]
     pub fn with_base_url(base_url: Url) -> Self {
         Self::with_base_urls(NonEmpty::singleton(base_url))
     }
 
-    /// Creates a new [`SciHubScraper`] with the given sci-hub base urls.
+    /// Creates a new [`Scraper`] with the given scihub base urls.
     #[must_use]
     pub fn with_base_urls(base_urls: NonEmpty<Url>) -> Self {
         Self::with_base_urls_and_client(base_urls, Client::new())
     }
 
-    /// Creates a new [`SciHubScraper`] with the given sci-hub base urls and [`Client`].
+    /// Creates a new [`Scraper`] with the given scihub base urls and [`Client`].
     #[must_use]
     pub fn with_base_urls_and_client(base_urls: NonEmpty<Url>, client: Client) -> Self {
         Scraper {
             client,
-            base_urls: Self::base_urls_as_heap(base_urls),
+            pool: UrlPool::new(base_urls),
         }
     }
 
-    /// Creates a new [`SciHubScraper`] with automatically detected base urls.
+    /// Creates a new [`Scraper`] with automatically detected base urls.
     pub async fn with_auto_detected_base_urls() -> Result<Self, FetchBaseUrlError> {
         let client = Client::new();
         let base_urls = fetch_base_urls(&client).await?;
         Ok(Self::with_base_urls_and_client(base_urls, client))
     }
 
-    /// Generates a scihub paper url from the given base url and doi.
-    pub fn scihub_url_from_base_url_and_doi(
-        base_url: &Url,
-        doi: &str,
-    ) -> Result<Url, url::ParseError> {
-        base_url.join(doi)
-    }
-    fn convert_protocol_relative_url_to_absolute(relative_url: &str, absolute_url: &Url) -> String {
-        if relative_url.starts_with("//") {
-            format!("{}:{}", absolute_url.scheme(), relative_url)
-        } else {
-            relative_url.to_string()
-        }
-    }
-    fn base_urls_as_heap(base_urls: NonEmpty<Url>) -> BinaryHeap<WeightedUrl> {
-        let mut heap = BinaryHeap::with_capacity(base_urls.len());
-        for base_url in base_urls {
-            heap.push(base_url.into());
-        }
-        heap
-    }
-
-    /// Fetches the paper with the given doi from sci-hub.
+    /// Fetches the paper with the given doi from scihub.
     pub async fn fetch_paper_by_doi(&mut self, doi: &str) -> Result<Paper, FetchPaperError> {
-        let mut failing_urls: Vec<WeightedUrl> = Vec::new();
+        let mut failing_urls = Vec::new();
         let mut last_error = None;
-        while let Some(base_url) = self.base_urls.peek() {
-            let url = Self::scihub_url_from_base_url_and_doi(&base_url.url, doi)?;
+
+        while let Some(weighted) = self.pool.pop() {
+            let url = weighted.url.join(doi)?;
 
             match self.fetch_paper_from_scihub_url(url).await {
                 Ok(paper) => {
-                    for mut failing_url in failing_urls {
-                        failing_url.weight -= 10;
-                        self.base_urls.push(failing_url);
-                    }
-                    let mut working_base_url = self.base_urls.peek_mut().unwrap();
-                    working_base_url.weight += 1;
+                    self.pool.report_success(weighted, failing_urls);
                     return Ok(paper);
                 }
                 Err(err) => {
-                    failing_urls.push(self.base_urls.pop().unwrap());
+                    failing_urls.push(weighted);
                     last_error = Some(err);
                 }
-            };
+            }
         }
-        Err(last_error.unwrap())
+
+        self.pool.report_failures(failing_urls);
+        Err(last_error.unwrap_or(FetchPaperError::MissingPaperInfo))
     }
-    /// Fetches the paper with the given url from sci-hub, automatically fetching current sci-hub domains.
-    pub async fn fetch_paper_by_paper_url(&mut self, url: &str) -> Result<Paper, FetchPaperError> {
-        self.fetch_paper_by_doi(url).await
-    }
-    /// Fetches the paper with the given doi using the given sci-hub base url.
-    pub async fn fetch_paper_by_base_url_and_doi(
-        &self,
-        base_url: &Url,
-        doi: &str,
-    ) -> Result<Paper, FetchPaperError> {
-        let url = Self::scihub_url_from_base_url_and_doi(base_url, doi)?;
-        self.fetch_paper_from_scihub_url(url).await
-    }
+
     /// Fetches the paper from the given scihub url.
     pub async fn fetch_paper_from_scihub_url(&self, url: Url) -> Result<Paper, FetchPaperError> {
         let document = fetch_html_document(&self.client, url.clone()).await?;
 
-        lazy_static! {
-            static ref TITLE_SELECTOR: Selector = Selector::parse("head title").unwrap();
-            static ref DOWNLOAD_BUTTON_SELECTOR: Selector =
-                Selector::parse("#buttons [onclick]").unwrap();
-            static ref VERSIONS_SELECTOR: Selector = Selector::parse("#versions a[href]").unwrap();
-            static ref BOLD_SELECTOR: Selector = Selector::parse("b").unwrap();
-        }
-
         let (doi, paper_title) = document
-            .select(&TITLE_SELECTOR)
+            .select(title_selector())
             .find_map(|node| {
                 let title = node.inner_html();
                 let mut iter = title.rsplit('|').map(str::trim);
@@ -128,28 +107,33 @@ impl Scraper {
             .ok_or(FetchPaperError::MissingPaperInfo)?;
 
         let raw_pdf_url = document
-            .select(&DOWNLOAD_BUTTON_SELECTOR)
+            .select(download_selector())
             .filter_map(|node| node.value().attr("onclick"))
-            .filter_map(|attrval| Some(&attrval[attrval.find('\'')? + 1..attrval.rfind('\'')?]))
+            .filter_map(|attrval| {
+                let start = attrval.find('\'')? + 1;
+                let end = attrval.rfind('\'')?;
+                Some(&attrval[start..end])
+            })
             .next()
             .ok_or(FetchPaperError::MissingPdfUrl)?;
-        let pdf_url = Self::convert_protocol_relative_url_to_absolute(raw_pdf_url, &url);
+
+        let pdf_url = self.convert_protocol_relative_url_to_absolute(raw_pdf_url, &url);
 
         let mut current_version = None;
         let other_versions: Vec<_> = document
-            .select(&VERSIONS_SELECTOR)
+            .select(versions_selector())
             .filter_map(|node| {
                 if current_version.is_none()
                     && let Some(version_str) =
-                        node.select(&BOLD_SELECTOR).next().map(|b| b.inner_html())
+                        node.select(bold_selector()).next().map(|b| b.inner_html())
                 {
                     current_version = Some(version_str);
-                    return None; // do not include current version
+                    return None;
                 }
 
                 let version_href = node.value().attr("href")?;
                 let version_url =
-                    Self::convert_protocol_relative_url_to_absolute(version_href, &url);
+                    self.convert_protocol_relative_url_to_absolute(version_href, &url);
 
                 Some(PaperVersion {
                     version: node.inner_html(),
@@ -170,82 +154,21 @@ impl Scraper {
         })
     }
 
-    /// Fetches the pdf url of the paper with the given doi from sci-hub, automatically fetching current sci-hub domains.
-    pub async fn fetch_paper_pdf_url_by_doi(&mut self, doi: &str) -> Result<Url, FetchPaperError> {
-        let mut failing_urls: Vec<WeightedUrl> = Vec::new();
-        let mut last_error = None;
-        while let Some(base_url) = self.base_urls.peek() {
-            let url = Self::scihub_url_from_base_url_and_doi(&base_url.url, doi)?;
+    // TODO: readd method for directly fetching the pdf url
+    // for some mirrors we can request the mobile page to directly get the pdf
+    // for other mirros we can request [base_url]/pdf/[doi].pdf
+    // for other none of these work
 
-            match self.fetch_paper_pdf_url_from_scihub_url(url).await {
-                Ok(paper) => {
-                    for mut failing_url in failing_urls {
-                        failing_url.weight -= 10;
-                        self.base_urls.push(failing_url);
-                    }
-                    let mut working_base_url = self.base_urls.peek_mut().unwrap();
-                    working_base_url.weight += 1;
-                    return Ok(paper);
-                }
-                Err(err) => {
-                    failing_urls.push(self.base_urls.pop().unwrap());
-                    last_error = Some(err);
-                }
-            };
+    fn convert_protocol_relative_url_to_absolute(
+        &self,
+        relative_url: &str,
+        absolute_url: &Url,
+    ) -> String {
+        if relative_url.starts_with("//") {
+            format!("{}:{}", absolute_url.scheme(), relative_url)
+        } else {
+            relative_url.to_string()
         }
-        Err(last_error.unwrap())
-    }
-    /// Fetches the pdf url of the paper with the given url from sci-hub, automatically fetching current sci-hub domains.
-    pub async fn fetch_paper_pdf_url_by_paper_url(
-        &mut self,
-        url: &str,
-    ) -> Result<Url, FetchPaperError> {
-        self.fetch_paper_pdf_url_by_doi(url).await
-    }
-    /// Fetches the pdf url of the paper with the given doi using the given sci-hub base url.
-    pub async fn fetch_paper_pdf_url_by_base_url_and_doi(
-        &self,
-        base_url: &Url,
-        doi: &str,
-    ) -> Result<Url, FetchPaperError> {
-        let url = Self::scihub_url_from_base_url_and_doi(base_url, doi)?;
-        self.fetch_paper_pdf_url_from_scihub_url(url).await
-    }
-    /// Fetches the pdf url of the paper from the given scihub url.
-    pub async fn fetch_paper_pdf_url_from_scihub_url(
-        &self,
-        url: Url,
-    ) -> Result<Url, FetchPaperError> {
-        let client = Client::builder()
-            .redirect(redirect::Policy::none())
-            .build()?;
-
-        let response = client
-            .get(url.clone())
-            .header(
-                header::USER_AGENT,
-                "Mozilla/5.0 (Android 4.4; Mobile; rv:42.0) Gecko/42.0 Firefox/42.0",
-            ) // "disguise" as mobile (mobile page allows easier scraping)
-            .send()
-            .await?;
-        dbg!(&url);
-        dbg!(&response);
-
-        response
-            .headers()
-            .get(header::LOCATION)
-            .ok_or(FetchPaperError::MissingPdfUrl)?
-            .to_str()
-            .map_err(|_| FetchPaperError::MalformedPdfUrl)
-            .map(|pdf_url| Self::convert_protocol_relative_url_to_absolute(pdf_url, &url))
-            .and_then(|url_str| Url::parse(&url_str).map_err(|e| e.into()))
-            .and_then(|url| {
-                if url.domain().is_some_and(|e| e.contains("sci-hub")) {
-                    Ok(url)
-                } else {
-                    Err(FetchPaperError::InvalidRedirect)
-                }
-            })
     }
 }
 
@@ -256,7 +179,6 @@ pub struct Paper {
     pub title: String,
     pub version: String,
     pub download_url: Url,
-    // pub citation: String,
     pub other_versions: Vec<PaperVersion>,
 }
 
@@ -266,70 +188,25 @@ pub struct PaperVersion {
     pub scihub_url: Url,
 }
 
-#[derive(Debug, Clone)]
-pub struct WeightedUrl {
-    pub url: Url,
-    weight: i32,
-}
-impl PartialEq for WeightedUrl {
-    fn eq(&self, other: &Self) -> bool {
-        self.url == other.url
-    }
-}
-impl Eq for WeightedUrl {}
-impl PartialOrd for WeightedUrl {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-impl Ord for WeightedUrl {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.weight.cmp(&other.weight)
-    }
-}
-impl From<Url> for WeightedUrl {
-    fn from(url: Url) -> Self {
-        WeightedUrl { url, weight: 0 }
-    }
-}
-impl From<WeightedUrl> for Url {
-    fn from(url: WeightedUrl) -> Url {
-        url.url
-    }
-}
-
 /// Fetches a list of base urls from wikipedia and using brave search.
 pub async fn fetch_base_urls(client: &Client) -> Result<NonEmpty<Url>, FetchBaseUrlError> {
     let provider_urls = [
-        "https://en.wikipedia.org/wiki/Sci-Hub",
-        "https://search.brave.com/search?q=sci-hub",
+        "https://en.wikipedia.org/wiki/scihub",
+        "https://search.brave.com/search?q=scihub",
     ];
 
     let mut base_urls = Vec::new();
     for provider_url in provider_urls {
         let provider_url = Url::parse(provider_url).unwrap();
-        match fetch_base_urls_from_provider(client, provider_url).await {
-            Ok(mut urls) => {
-                base_urls.push(urls.head);
-                base_urls.append(&mut urls.tail)
-            }
-            Err(FetchBaseUrlError::NoneFound) => continue,
-            Err(err) => return Err(err),
-        };
+        if let Ok(urls) = fetch_base_urls_from_provider(client, provider_url).await {
+            base_urls.extend(urls);
+        }
     }
 
-    if base_urls.is_empty() {
-        return Err(FetchBaseUrlError::NoneFound);
-    }
+    base_urls.sort_unstable();
+    base_urls.dedup();
 
-    if let Some(last) = base_urls.pop() {
-        Ok(NonEmpty {
-            head: last,
-            tail: base_urls,
-        })
-    } else {
-        Err(FetchBaseUrlError::NoneFound)
-    }
+    NonEmpty::from_vec(base_urls).ok_or(FetchBaseUrlError::NoneFound)
 }
 
 /// Fetches a list of base urls from the given provider.
@@ -339,12 +216,8 @@ pub async fn fetch_base_urls_from_provider(
 ) -> Result<NonEmpty<Url>, FetchBaseUrlError> {
     let document = fetch_html_document(client, provider_url).await?;
 
-    lazy_static! {
-        static ref LINK_SELECTOR: Selector = Selector::parse("a[href]").unwrap();
-    }
-
-    let mut base_urls: Vec<Url> = document
-        .select(&LINK_SELECTOR)
+    let urls: Vec<Url> = document
+        .select(link_selector())
         .filter_map(|node| node.value().attr("href"))
         .filter_map(|href| Url::parse(href).ok())
         .map(|mut url| {
@@ -355,21 +228,11 @@ pub async fn fetch_base_urls_from_provider(
         })
         .filter(|url| {
             url.host_str()
-                .is_some_and(|host| host.contains("sci-hub") || host.contains("scihub"))
+                .is_some_and(|host| host.contains("scihub") || host.contains("sci-hub"))
         })
         .collect();
 
-    base_urls.sort_unstable();
-    base_urls.dedup();
-
-    if let Some(last) = base_urls.pop() {
-        Ok(NonEmpty {
-            head: last,
-            tail: base_urls,
-        })
-    } else {
-        Err(FetchBaseUrlError::NoneFound)
-    }
+    NonEmpty::from_vec(urls).ok_or(FetchBaseUrlError::NoneFound)
 }
 
 async fn fetch_html_document(client: &Client, url: Url) -> Result<Html, reqwest::Error> {

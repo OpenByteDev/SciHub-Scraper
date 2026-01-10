@@ -8,17 +8,11 @@ pub enum FetchPaperError {
     #[error("failed to parse url: {0}")]
     UrlParse(#[from] url::ParseError),
 
-    #[error("received malformed pdf url from sci-hub")]
-    MalformedPdfUrl,
-
     #[error("found no pdf url on sci-hub")]
     MissingPdfUrl,
 
     #[error("found no paper ingo on sci-hub")]
     MissingPaperInfo,
-
-    #[error("redirected to invalid site")]
-    InvalidRedirect,
 }
 
 #[derive(Debug, Error)]
